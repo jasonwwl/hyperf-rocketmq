@@ -16,10 +16,8 @@ use Hyperf\Contract\StdoutLoggerInterface;
 use Hyperf\Di\Annotation\Inject;
 use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
+use ReflectionClass;
 use Turing\HyperfRocketmq\Annotation\Consumer as ConsumerAnnotation;
-use Turing\HyperfRocketmq\Annotation\ConsumerTag;
-use Turing\HyperfRocketmq\Annotation\Producer as ProducerAnnotation;
-use Turing\HyperfRocketmq\Message as ProducerMessage;
 use Turing\HyperfRocketmq\MQ\Exception\MessageNotExistException;
 use Turing\HyperfRocketmq\MQ\Model\Message;
 use Turing\HyperfRocketmq\MQ\MQClient;
@@ -33,8 +31,6 @@ class ConsumerProcess
 
     private ConsumerAnnotation $options;
 
-    private array $messageAnnotations;
-
     /**
      * @Inject
      */
@@ -42,7 +38,15 @@ class ConsumerProcess
 
     private LoggerInterface $logger;
 
-    public function __construct(array $config, ConsumerAnnotation $options, array $messageAnnotations)
+    private ConsumerInterface $instance;
+
+    private array $tagAnnotations;
+
+    private array $tagMethodMap = [];
+
+    private array $methodParamMap = [];
+
+    public function __construct(array $config, ConsumerInterface $instance, ConsumerAnnotation $options, array $tagAnnotations)
     {
         $this->client = new MQClient(
             $config['endpoint'],
@@ -51,11 +55,22 @@ class ConsumerProcess
         );
         $this->options = $options;
         $this->consumer = $this->client->getConsumer($config['instance_id'], $options->topic, $config['group']);
-        $this->messageAnnotations = $messageAnnotations;
         $this->logger = $this->container->get(StdoutLoggerInterface::class);
+        $this->instance = $instance;
+        $relClass = new ReflectionClass(get_class($instance));
+        foreach ($tagAnnotations as $tag => $meta) {
+            $method = $meta['method'];
+            $this->tagMethodMap[$tag] = $method;
+            $this->tagAnnotations[$tag] = $meta['annotation'];
+            $relMethod = $relClass->getMethod($method);
+            $params = $relMethod->getParameters();
+            if (isset($params[0]) && $params[0]->getType() && ! $params[0]->getType()->isBuiltin()) {
+                $this->methodParamMap[$method] = $params[0]->getType()->getName();
+            }
+        }
     }
 
-    public function consume(ConsumerInterface $consumer, array $tagsAnnotation)
+    public function consume()
     {
         while (true) {
             try {
@@ -72,34 +87,19 @@ class ConsumerProcess
              */
             foreach ($messages as $message) {
                 try {
-                    $method = null;
-                    /**
-                     * @var ConsumerTag $tagAnnotation
-                     * @var string $methodName
-                     */
-                    foreach ($tagsAnnotation as $methodName => $tagAnnotation) {
-                        if ($tagAnnotation->tag === $message->getMessageTag()) {
-                            $method = $methodName;
-                        }
-                    }
+                    $method = $this->tagMethodMap[$message->getMessageTag()];
                     if ($method) {
-                        /**
-                         * @var ProducerAnnotation $annotation
-                         * @var string $messageClass
-                         */
-                        foreach ($this->messageAnnotations as $messageClass => $annotation) {
-                            if ($this->options->topic === $annotation->topic && $message->getMessageTag() === $annotation->tag) {
-                                /**
-                                 * @var ProducerMessage $messageInstance
-                                 */
-                                $messageInstance = new $messageClass();
-                                $decode = json_decode($message->getMessageBody(), true);
-                                foreach ($decode as $k => $v) {
-                                    $messageInstance->{$k} = $v;
-                                }
+                        $decode = json_decode($message->getMessageBody(), true);
+                        if (isset($this->methodParamMap[$method])) {
+                            $msg = new $this->methodParamMap[$method]();
+                            foreach ($decode as $k => $v) {
+                                $msg->{$k} = $v;
                             }
+                        } else {
+                            $msg = $decode;
                         }
-                        $result = $consumer->{$method}($messageInstance);
+                        $decode = json_decode($message->getMessageBody());
+                        $result = $this->instance->{$method}($msg, $message->getMessageTag());
                     } else {
                         $result = true;
                     }

@@ -17,6 +17,19 @@ class Message
 
     public string $_message_key = '';
 
+    public string $_topic = '';
+
+    public string $_tag = '';
+
+    public function __construct(string $tag = '', string $topic = '', float $deliverTime = 0)
+    {
+        $this->setTopic($topic);
+
+        $this->setTag($tag);
+
+        $this->setStartDeliverTime($deliverTime);
+    }
+
     /**
      * 定时消息，单位毫秒（ms），在指定时间戳（当前时间之后）进行投递。
      * 如果被设置成当前时间戳之前的某个时刻，消息将立刻投递给消费者.
@@ -32,5 +45,25 @@ class Message
     public function setMessageKey(string $key)
     {
         $this->_message_key = $key;
+    }
+
+    public function setTopic(string $topic)
+    {
+        $this->_topic = $topic;
+    }
+
+    public function setTag(string $tag)
+    {
+        $this->_tag = $tag;
+    }
+
+    public function getTopic()
+    {
+        return $this->_topic;
+    }
+
+    public function getTag()
+    {
+        return $this->_tag;
     }
 }

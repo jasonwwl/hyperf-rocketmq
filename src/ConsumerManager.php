@@ -11,6 +11,7 @@ declare(strict_types=1);
  */
 namespace Turing\HyperfRocketmq;
 
+use Exception;
 use Hyperf\Contract\ConfigInterface;
 use Hyperf\Di\Annotation\AnnotationCollector;
 use Hyperf\Process\AbstractProcess;
@@ -18,7 +19,6 @@ use Hyperf\Process\ProcessManager;
 use Psr\Container\ContainerInterface;
 use Turing\HyperfRocketmq\Annotation\Consumer as ConsumerAnnotation;
 use Turing\HyperfRocketmq\Annotation\ConsumerTag;
-use Turing\HyperfRocketmq\Annotation\Producer as ProducerAnnotation;
 
 class ConsumerManager
 {
@@ -32,50 +32,52 @@ class ConsumerManager
     public function run()
     {
         $consumers = AnnotationCollector::getClassesByAnnotation(ConsumerAnnotation::class);
-        $messageAnnotations = AnnotationCollector::getClassesByAnnotation(ProducerAnnotation::class);
         $tagsAnnotation = AnnotationCollector::getMethodsByAnnotation(ConsumerTag::class);
         $configUtil = $this->container->get(ConfigInterface::class);
         $config = $configUtil->get('rocketmq.default');
+
         /**
          * @var string $consumerClass
          * @var ConsumerAnnotation $annotation
          */
         foreach ($consumers as $consumerClass => $annotation) {
             $instance = make($consumerClass);
-            $consumerProcess = new ConsumerProcess($config, $annotation, $messageAnnotations);
-            $methodAnnotations = [];
+            $tagAnnotations = [];
             foreach ($tagsAnnotation as $tagClassItem) {
                 if ($tagClassItem['class'] === $consumerClass) {
-                    $methodAnnotations[$tagClassItem['method']] = $tagClassItem['annotation'];
+                    $tags = explode(',', $tagClassItem['annotation']->tag);
+                    foreach ($tags as $tag) {
+                        if (isset($tagAnnotations[$tag])) {
+                            throw new Exception('Tag"' . $tag . "\"不可定义于多个method上!\n(错误Consumer: " . $consumerClass . ', 错误Method: ' . $tagClassItem['method'] . ')');
+                        }
+                        $tagAnnotations[$tag] = $tagClassItem;
+                    }
                 }
             }
-            $process = $this->createProcess($consumerProcess, $instance, $methodAnnotations);
+            $consumerProcess = new ConsumerProcess($config, $instance, $annotation, $tagAnnotations);
+            $process = $this->createProcess($consumerProcess);
             $process->nums = $annotation->numOfProcess;
             $process->name = 'consumer-' . $annotation->topic;
             ProcessManager::register($process);
         }
     }
 
-    public function createProcess(ConsumerProcess $consumerProcess, ConsumerInterface $consumer, array $methodAnnotations)
+    public function createProcess(ConsumerProcess $consumerProcess)
     {
-        return new class($this->container, $consumerProcess, $consumer, $methodAnnotations) extends AbstractProcess {
+        return new class($this->container, $consumerProcess) extends AbstractProcess {
             private ConsumerInterface $consumer;
 
             private ConsumerProcess $consumerProcess;
 
-            private array $methodAnnotations;
-
-            public function __construct(ContainerInterface $container, ConsumerProcess $consumerProcess, ConsumerInterface $consumer, array $methodAnnotations)
+            public function __construct(ContainerInterface $container, ConsumerProcess $consumerProcess)
             {
                 parent::__construct($container);
                 $this->consumerProcess = $consumerProcess;
-                $this->consumer = $consumer;
-                $this->methodAnnotations = $methodAnnotations;
             }
 
             public function handle(): void
             {
-                $this->consumerProcess->consume($this->consumer, $this->methodAnnotations);
+                $this->consumerProcess->consume();
             }
         };
     }

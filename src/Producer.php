@@ -14,6 +14,9 @@ namespace Turing\HyperfRocketmq;
 use Exception;
 use Hyperf\Contract\ConfigInterface;
 use Hyperf\Di\Annotation\AnnotationCollector;
+use Hyperf\Retry\Policy\ClassifierRetryPolicy;
+use Hyperf\Retry\Policy\MaxAttemptsRetryPolicy;
+use Hyperf\Retry\Retry;
 use Psr\Container\ContainerInterface;
 use Turing\HyperfRocketmq\Annotation\Producer as AnnotationProducer;
 use Turing\HyperfRocketmq\MQ\Model\TopicMessage;
@@ -42,21 +45,31 @@ class Producer
 
     public function publish(Message $message)
     {
-        /**
-         * @var AnnotationProducer $annotation
-         */
-        $annotation = AnnotationCollector::getClassAnnotation(get_class($message), AnnotationProducer::class);
-        if (! $annotation) {
-            throw new Exception('RocketMQ消息必须通过"Annotation\Producer"注解指定tag和topic');
-        }
-        if (! $annotation->topic) {
-            throw new Exception('RocketMQ消息必须通过"Annotation\Producer"注解指定topic');
-        }
-        if (! $annotation->tag) {
-            throw new Exception('RocketMQ消息必须通过"Annotation\Producer"注解指定tag');
+        $tag = $message->getTag();
+        $topic = $message->getTopic();
+        if (! $tag || ! $topic) {
+            /**
+             * @var AnnotationProducer $annotation
+             */
+            $annotation = AnnotationCollector::getClassAnnotation(get_class($message), AnnotationProducer::class);
+            if (! $annotation) {
+                throw new Exception('RocketMQ消息必须通过"Annotation\Producer"注解指定tag、topic');
+            }
+            if (! $topic) {
+                if (! $annotation->topic) {
+                    throw new Exception('RocketMQ消息必须通过"Annotation\Producer"注解指定topic');
+                }
+                $topic = $annotation->topic;
+            }
+            if (! $tag) {
+                if (! $annotation->tag) {
+                    throw new Exception('RocketMQ消息必须通过"Annotation\Producer"注解指定tag');
+                }
+                $tag = $annotation->tag;
+            }
         }
         $publishMsg = new TopicMessage(json_encode($message));
-        $publishMsg->setMessageTag($annotation->tag);
+        $publishMsg->setMessageTag($tag);
 
         if ($message->_deliver_time > 0) {
             $publishMsg->setStartDeliverTime($message->_deliver_time);
@@ -65,8 +78,12 @@ class Producer
         if ($message->_message_key) {
             $publishMsg->setMessageKey($message->_message_key);
         }
-
-        $producer = $this->client->getProducer($this->config['instance_id'], $annotation->topic);
-        $producer->publishMessage($publishMsg);
+        return Retry::with(
+            new ClassifierRetryPolicy(),
+            new MaxAttemptsRetryPolicy(5),
+        )->call(function () use ($publishMsg, $topic) {
+            $producer = $this->client->getProducer($this->config['instance_id'], $topic);
+            return $producer->publishMessage($publishMsg);
+        });
     }
 }
