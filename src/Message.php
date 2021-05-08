@@ -21,6 +21,8 @@ class Message
 
     public string $_tag = '';
 
+    public string $_receipt_handle = '';
+
     public function __construct(string $tag = '', string $topic = '', float $deliverTime = 0)
     {
         $this->setTopic($topic);
@@ -65,5 +67,15 @@ class Message
     public function getTag()
     {
         return $this->_tag;
+    }
+
+    public function getReceiptHandle()
+    {
+        return $this->_receipt_handle;
+    }
+
+    public function setReceiptHandle(string $hd)
+    {
+        return $this->_receipt_handle = $hd;
     }
 }

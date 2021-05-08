@@ -41,7 +41,7 @@ class ConsumerManager
          * @var ConsumerAnnotation $annotation
          */
         foreach ($consumers as $consumerClass => $annotation) {
-            $instance = make($consumerClass);
+            // $instance = make($consumerClass);
             $tagAnnotations = [];
             foreach ($tagsAnnotation as $tagClassItem) {
                 if ($tagClassItem['class'] === $consumerClass) {
@@ -54,7 +54,7 @@ class ConsumerManager
                     }
                 }
             }
-            $consumerProcess = new ConsumerProcess($config, $instance, $annotation, $tagAnnotations);
+            $consumerProcess = new ConsumerProcess($config, $consumerClass, $annotation, $tagAnnotations);
             $process = $this->createProcess($consumerProcess);
             $process->nums = $annotation->numOfProcess;
             $process->name = 'consumer-' . $annotation->topic;

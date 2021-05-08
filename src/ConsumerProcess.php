@@ -46,7 +46,7 @@ class ConsumerProcess
 
     private array $methodParamMap = [];
 
-    public function __construct(array $config, ConsumerInterface $instance, ConsumerAnnotation $options, array $tagAnnotations)
+    public function __construct(array $config, string $instanceClass, ConsumerAnnotation $options, array $tagAnnotations)
     {
         $this->client = new MQClient(
             $config['endpoint'],
@@ -56,8 +56,9 @@ class ConsumerProcess
         $this->options = $options;
         $this->consumer = $this->client->getConsumer($config['instance_id'], $options->topic, $config['group']);
         $this->logger = $this->container->get(StdoutLoggerInterface::class);
-        $this->instance = $instance;
-        $relClass = new ReflectionClass(get_class($instance));
+        $this->instance = make($instanceClass, [$this->consumer]);
+        // $relClass = new ReflectionClass(get_class($this->instance));
+        $relClass = new ReflectionClass($instanceClass);
         foreach ($tagAnnotations as $tag => $meta) {
             $method = $meta['method'];
             $this->tagMethodMap[$tag] = $method;
@@ -99,7 +100,7 @@ class ConsumerProcess
                             $msg = $decode;
                         }
                         $decode = json_decode($message->getMessageBody());
-                        $result = $this->instance->{$method}($msg, $message->getMessageTag());
+                        $result = $this->instance->{$method}($msg, $message->getMessageTag(), $message->getReceiptHandle());
                     } else {
                         $result = true;
                     }

@@ -13,13 +13,17 @@ namespace Turing\HyperfRocketmq;
 
 use Turing\HyperfRocketmq\MQ\MQConsumer;
 
-// use Turing\HyperfRocketmq\MQ\Model\Message;
-
-interface ConsumerInterface
+class BaseConsumer implements ConsumerInterface
 {
-    public function __construct(MQConsumer $mQConsumer);
+    public MQConsumer $consumer;
 
-    public function ack(string $handle);
+    public function __construct(MQConsumer $consumer)
+    {
+        $this->consumer = $consumer;
+    }
 
-    // public function consume(Message $message, string $tag);
+    public function ack(string $handle)
+    {
+        return $this->consumer->ackMessage([$handle]);
+    }
 }
